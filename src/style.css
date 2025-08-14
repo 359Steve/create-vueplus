@@ -1,0 +1,14 @@
+@import 'tailwindcss';
+
+body {
+    margin: 0;
+    padding: 0;
+}
+
+ul {
+    list-style: none;
+}
+
+* {
+    box-sizing: border-box;
+}
