@@ -1,5 +1,5 @@
 declare interface ResponseData<T = any> {
-  code: number
-  message: string
-  data: T
+    code: number;
+    message: string;
+    data: T;
 }
