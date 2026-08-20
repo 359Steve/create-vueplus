@@ -1,5 +1,9 @@
-declare interface ResponseData<T = any> {
-    code: number;
-    message: string;
-    data: T;
+type RemoveIndexSignature<T> = {
+    [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
+};
+
+type EnvKey = keyof RemoveIndexSignature<ImportMetaEnv>;
+
+interface Window {
+    ENV: Record<EnvKey, any>;
 }
