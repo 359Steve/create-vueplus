@@ -1,87 +1,142 @@
 import type L from 'leaflet';
+import type { DrawSession } from './BaseDrawer';
 import type { DrawRequest } from './DrawTypes';
 import { BaseDrawer } from './BaseDrawer';
 
+/** 多边形绘制器：单击加点，双击闭合 */
 export class PolygonDrawer extends BaseDrawer {
-    draw(args: DrawRequest<'Polygon'>) {
+    /** 已确定的多边形顶点 */
+    private readonly _points: L.LatLngExpression[] = [];
+    /** 两点预览折线 ID */
+    private readonly _previewLineId = this.createDrawId('previewLine');
+    /** 预览多边形 ID */
+    private readonly _previewPolygonId = this.createDrawId('previewPolygon');
+    /** 当前绘制会话 */
+    private _drawSession: ReturnType<BaseDrawer['createDrawSession']>;
+    /** 当前图层编辑会话 */
+    private _layerSession: ReturnType<BaseDrawer['createLayerSession']>;
+
+    /**
+     * 开始绘制多边形
+     * @param args 多边形绘制请求
+     * @returns 绘制会话；地图未就绪时返回 undefined
+     */
+    draw(args: DrawRequest<'Polygon'>): DrawSession | undefined {
         const map = this._mapManager.map;
 
         if (!map) return;
 
         const { callback, options } = args;
-        const points: L.LatLngExpression[] = [];
+        const { tooltip, toolTipOptions, ...arg } = options ?? {};
+
         // 预览多边形
-        let previewPolygon = this._mapManager.polygons.addPolygon(
-            [],
-            this.getPreviewPathOptions(options),
-            'previewPolygon',
-        );
+        let previewPolygon: L.Polygon | null;
         // 预览线条
-        let previewLine = this._mapManager.polylines.addPolyline([], this.getPreviewLineOptions(), 'previewLine');
+        let previewLine: L.Polyline | null;
 
-        if (!previewPolygon || !previewLine) return;
+        const handlePolygonClick = this.createEditClickHandler(
+            (): L.Polygon | null => previewPolygon,
+            (currentPolygon): void => {
+                const points = currentPolygon.getLatLngs()[0] as L.LatLng[];
 
-        /** 点击添加多边形点 */
-        const handleClick = (e: L.LeafletMouseEvent) => {
-            points.push([e.latlng.lat, e.latlng.lng]);
-
-            if (points.length === 2) {
-                previewLine?.setLatLngs(points);
-            }
-        };
+                callback({
+                    id: this._previewPolygonId,
+                    data: points.map((item) => [item.lat, item.lng]),
+                });
+            },
+        );
 
         /** 移动鼠标绘制预览多边形 */
-        const handleMouseMove = (e: L.LeafletMouseEvent) => {
-            if (!points.length) return;
+        const handleMouseMove = (e: L.LeafletMouseEvent): void => {
+            if (!this._points.length) return;
 
             const { lat, lng } = e.latlng;
 
-            if (points.length === 1) {
-                previewLine?.setLatLngs([...points, [lat, lng]]);
+            if (this._points.length === 1) {
+                previewLine?.setLatLngs([...this._points, [lat, lng]]);
                 return;
             }
 
-            this._mapManager.polylines.getPolyline('previewLine') &&
-                // eslint-disable-next-line style/indent-binary-ops
-                this._mapManager.polylines.removePolyline('previewLine');
-            previewPolygon?.setLatLngs([...points, [lat, lng]]);
+            if (previewLine) {
+                this._mapManager.polylines.removePolyline(this._previewLineId);
+                previewLine = null;
+            }
+
+            previewPolygon?.setLatLngs([...this._points, [lat, lng]]);
         };
 
-        const handlePolygonClick = this.createEditClickHandler(
-            () => previewPolygon,
-            (currentPolygon) => {
-                const points = currentPolygon.getLatLngs() as L.LatLng[];
+        /** 点击添加多边形点 */
+        const handleClick = (e: L.LeafletMouseEvent): void => {
+            const point: L.LatLngExpression = [e.latlng.lat, e.latlng.lng];
+            this._points.push(point);
 
-                callback(points.map((item) => [item.lat, item.lng]));
-            },
-        );
+            if (!previewPolygon && !previewLine) {
+                previewPolygon = this._mapManager.polygons.addPolygon(
+                    this._previewPolygonId,
+                    [point],
+                    this.getPreviewPathOptions(arg),
+                );
+
+                previewLine = this._mapManager.polylines.addPolyline(
+                    this._previewLineId,
+                    [point],
+                    this.getPreviewLineOptions(arg),
+                );
+
+                return;
+            }
+
+            previewLine?.addLatLng(point);
+        };
 
         /** 双击结束 */
-        const handleDblClick = () => {
-            // 移除事件监听
-            map.off('click', handleClick);
-            map.off('mousemove', handleMouseMove);
-            map.off('dblclick', handleDblClick);
+        const handleDblClick = (): void => {
+            if (this._points.length < 3) return;
 
-            previewPolygon?.setStyle(this.getFinalPathOptions(options));
+            this._drawSession?.complete();
 
-            previewPolygon?.on('click', handlePolygonClick);
-            previewPolygon?.pm.enable();
+            previewPolygon?.setStyle(this.getFinalPathOptions(arg));
+            previewPolygon?.bindTooltip(tooltip || '点击编辑', toolTipOptions);
+
+            this._layerSession = this.createLayerSession(
+                [
+                    ['click', handlePolygonClick],
+                    [
+                        'remove',
+                        (e: L.LeafletEvent): void => this.layerMarkerRemove(e, this._drawSession?.finish, args.notice),
+                    ],
+                    ['pm:enable', this.layerEdit],
+                    ['pm:disable', this.layerEdit],
+                ],
+                (): L.Polygon | null => previewPolygon,
+            );
+
+            callback({
+                id: this._previewPolygonId,
+                data: this._points,
+            });
         };
 
-        return this.createDrawSession(
+        this._drawSession = this.createDrawSession(
             [
-                ['click', handleClick],
+                ['click', (e: L.LeafletMouseEvent): void => this.createClicks(e, handleClick, handleDblClick)],
                 ['mousemove', handleMouseMove],
-                ['dblclick', handleDblClick],
             ],
-            () => {
-                points.length = 0;
-                previewLine = null;
-                previewPolygon?.off('click', handlePolygonClick);
+            (): void => {
+                this._layerSession?.finish();
+
+                if (previewPolygon) {
+                    previewPolygon.off('click', handlePolygonClick);
+                    this._mapManager.polygons.removePolygon(this._previewPolygonId);
+                }
+
                 previewPolygon = null;
-                this._mapManager.polygons.removePolygon('previewPolygon');
+                this._points.length = 0;
+                this._drawSession = undefined;
+                this._layerSession = undefined;
             },
         );
+
+        return this._drawSession;
     }
 }

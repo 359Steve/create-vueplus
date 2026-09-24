@@ -1,13 +1,11 @@
 {
 	"extends": "@vue/tsconfig/tsconfig.dom.json",
 	"compilerOptions": {
-		"baseUrl": ".",
 		"paths": {
 			"@/*": [
 				"./src/*"
 			]
 		},
-		"ignoreDeprecations": "6.0",
 		"composite": true,
 		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
 		/* Linting */
@@ -15,13 +13,15 @@
 		"noFallthroughCasesInSwitch": true,
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
-		"emitDeclarationOnly": true,
-		"noEmit": false,
+		"noEmit": true,
 		"erasableSyntaxOnly": true,
 		"noUncheckedSideEffectImports": true
 	},
 	"include": [
+		"electron/**/*.ts",
+		"electron/**/*.d.ts",
 		"src/**/*.ts",
+		"src/**/*.d.ts",
 		"src/**/*.tsx",
 		"src/**/*.vue"
 	]

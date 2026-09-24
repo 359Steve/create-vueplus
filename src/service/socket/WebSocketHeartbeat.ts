@@ -3,7 +3,7 @@ import type { WebSocketManagerOptions, WebSocketPayload } from './types';
 /** 在连接存活期间按配置发送心跳 */
 export class WebSocketHeartbeat {
     /** 心跳定时器 */
-    private timer: ReturnType<typeof setInterval> | undefined;
+    private timer?: ReturnType<typeof setInterval>;
     /** 心跳相关配置 */
     private readonly options: WebSocketManagerOptions;
     /** 实际发送消息的回调 */

@@ -1,16 +1,21 @@
-# VuePlus
+# 项目名称
 
-一个由我**自行搭建的 Vue 3 项目基座**，基于 **Vite + TypeScript**，整合了常用工程化配置和业务层封装，用于**快速启动新项目**，避免每次从零搭建。
+> 基于 VuePlus 模板创建的 Vue 3 + TypeScript 项目
 
-该项目不是脚手架生成物，而是一个**可长期维护、复制复用的工程模板**——新项目只需在此基础上添加页面和业务逻辑即可。
+本项目使用 [create-vueplus](https://www.npmjs.com/package/create-vueplus) 脚手架生成，内置了完整的工程化配置和常用业务封装，开箱即用。
 
 ---
 
-## 适用场景
+## 项目简介
 
-- 需要 **Vue 3 + TypeScript** 的中后台或可视化前端项目
-- 项目涉及 **HTTP 接口、WebSocket 实时通信、地图展示、音视频播放** 等常见能力
-- 希望统一 **代码规范、目录结构、请求封装** 等工程约定
+该项目基于 **Vue 3 + Vite + TypeScript** 技术栈，集成了：
+
+- **完善的工程化配置**（ESLint、Prettier、自动导入等）
+- **HTTP 请求封装**（基于 Axios）
+- **WebSocket 实时通信**（支持断线重连、心跳保活）
+- **Leaflet 地图封装**（覆盖物管理、绘制工具、轨迹动画）
+- **音视频播放**（FLV 直播、WebRTC/WHEP）
+- **UI 组件库**（Element Plus、Tailwind CSS v4）
 
 ---
 
@@ -118,90 +123,194 @@ npm install
 # 启动开发服务器
 npm run dev
 
-# 类型检查 + 生产构建
+# 构建生产版本
 npm run build
 
 # 预览构建产物
 npm run preview
 ```
 
-### 作为新项目基座使用
+### 开发指南
 
-1. 复制或克隆本仓库到新项目目录
-2. 修改 `package.json` 中的 `name` 等字段
-3. 按需调整 `.env.development` / `.env.production` 中的环境变量
-4. 在 `src/pages/` 添加页面，并在 `src/router/index.ts` 注册路由
-5. 删除或保留 `src/service/` 中不需要的模块
-
----
-
-## 环境变量
-
-在项目根目录的 `.env.development` / `.env.production` 中配置，变量需以 `VITE_` 为前缀：
-
-| 变量 | 说明 |
-| --- | --- |
-| `VITE_API_BASE_URL` | HTTP 接口基础地址（默认 `/api`） |
-| `VITE_API_RTC_URL` | WebRTC / WHEP 服务地址（按需配置） |
-
-运行时可通过 `communalFunction.env.getEnv('VITE_API_BASE_URL')` 或 `import.meta.env.VITE_API_BASE_URL` 访问。
+1. **修改项目信息**：编辑 `package.json` 中的 name、description、author 等字段
+2. **配置环境变量**：按需调整 `.env.development` / `.env.production`
+3. **添加页面**：在 `src/pages/` 目录下创建页面组件
+4. **注册路由**：在 `src/router/index.ts` 中添加路由配置
+5. **按需删减**：根据项目需求，删除 `src/service/` 中不需要的模块（地图、WebSocket、音视频等）
 
 ---
 
 ## 常用命令
 
 ```bash
+# 启动开发服务器
+npm run dev
+
+# 构建生产版本
+npm run build
+
+# 预览构建产物
+npm run preview
+
 # 代码检查
 npm run lint
 
-# 自动修复
+# 自动修复代码问题
 npm run lint:fix
 
-# 格式化
+# 格式化代码
 npm run format
 
-# 检查格式
+# 检查代码格式
 npm run format:check
 ```
 
 ---
 
-## ESLint 规范
+## 使用说明
 
-采用 **ESLint v9（Flat Config）** + **@antfu/eslint-config**：
+### 环境变量配置
 
-- 内置 TypeScript、Vue、Prettier 规则，无需单独安装各类 `eslint-plugin-*`
-- 偏向一致性、可读性与工程实践
-- 支持 `npm run lint:fix` 自动修复
+在项目根目录的 `.env.development` / `.env.production` 中配置，变量需以 `VITE_` 为前缀：
 
-配置文件：`eslint.config.ts`
+| 变量 | 说明 | 示例 |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | HTTP 接口基础地址 | `/api` |
+| `VITE_API_RTC_URL` | WebRTC / WHEP 服务地址 | `https://example.com/whep` |
+
+访问环境变量：
+```typescript
+// 方式 1：直接访问
+import.meta.env.VITE_API_BASE_URL
+
+// 方式 2：通过封装的工具函数
+communalFunction.env.getEnv('VITE_API_BASE_URL')
+```
+
+### HTTP 请求
+
+项目内置了基于 Axios 的请求封装（`src/utils/request.ts`）：
+
+```typescript
+import { request } from '@/utils/request'
+
+// GET 请求
+const data = await request.get<ResponseType>('/api/users')
+
+// POST 请求
+const result = await request.post('/api/users', { name: 'xxx' })
+```
+
+特性：
+- 自动携带 Bearer Token（从 localStorage 读取 `gcs-token`）
+- 统一错误处理（401 自动跳转登录）
+- 支持泛型，提供完整的类型提示
+
+### WebSocket 使用
+
+使用 `WebSocketManager` 进行实时通信（`src/service/socket/`）：
+
+```typescript
+import { WebSocketManager } from '@/service/socket/WebSocketManager'
+
+const ws = new WebSocketManager('ws://example.com/socket')
+
+// 监听消息
+ws.on('message', (data) => {
+  console.log('收到消息:', data)
+})
+
+// 发送消息
+ws.send({ type: 'ping' })
+
+// 断开连接
+ws.disconnect()
+```
+
+特性：
+- 自动重连（指数退避策略）
+- 心跳保活
+- 断线消息队列
+- 事件总线订阅
+
+### 地图功能
+
+使用 `MapManager` 进行地图操作（`src/service/map/`）：
+
+```typescript
+import { MapManager } from '@/service/map/MapManager'
+
+const map = new MapManager('map-container')
+
+// 添加标记
+map.marker.add({ id: '1', latlng: [39.9, 116.4], popup: '北京' })
+
+// 绘制线
+map.polyline.add({ id: 'route1', latlngs: [[39.9, 116.4], [31.2, 121.5]] })
+
+// 启用绘制工具
+map.draw.enable('marker')
+```
+
+### 音视频播放
+
+**FLV 直播**：
+```typescript
+import { FlvManager } from '@/service/flv/FlvManger'
+
+const player = new FlvManager('video-element')
+player.load('https://example.com/live.flv')
+```
+
+**WebRTC/WHEP**：
+```typescript
+import { WebRtcManager } from '@/service/rtc/WebRtcManager'
+
+const rtc = new WebRtcManager('video-element')
+await rtc.play('https://example.com/whep/stream')
+```
 
 ---
 
-## 依赖说明
+## 项目规范
 
-### 运行时依赖（dependencies）
+### 代码风格
 
-| 依赖 | 说明 |
-| --- | --- |
-| `vue` / `vue-router` / `pinia` | 核心框架、路由、状态管理 |
-| `element-plus` | UI 组件库 |
-| `axios` | HTTP 请求 |
-| `@vueuse/core` | Composition API 工具集 |
-| `leaflet` 及相关插件 | 地图与绘制、轨迹 |
-| `flv.js` | FLV 直播播放 |
-| `jwt-decode` | JWT 解析 |
-| `echarts` | 图表（按需引入） |
-| `sass` | SCSS 预处理器 |
-| `@tailwindcss/vite` / `@tailwindcss/postcss` | Tailwind CSS v4 集成 |
+- **ESLint**：采用 `@antfu/eslint-config`，内置 TypeScript、Vue、Prettier 规则
+- **Prettier**：统一代码格式化，自动排序 Tailwind class
+- 配置文件：`eslint.config.ts`、`prettier.config.ts`
 
-### 开发依赖（devDependencies）
+### 目录结构建议
 
-| 依赖 | 说明 |
-| --- | --- |
-| `vite` / `@vitejs/plugin-vue` | 开发与构建 |
-| `typescript` / `vue-tsc` | 类型检查 |
-| `eslint` / `@antfu/eslint-config` | 代码规范 |
-| `prettier` / `prettier-plugin-tailwindcss` | 格式化与 Tailwind class 排序 |
-| `unplugin-auto-import` / `unplugin-vue-components` | 自动导入 |
-| `tailwindcss` | 原子化 CSS |
+- `src/pages/`：页面组件，按功能模块组织
+- `src/components/`：通用组件，会自动注册
+- `src/service/`：业务逻辑封装（API、WebSocket、地图等）
+- `src/utils/`：工具函数
+- `src/types/`：TypeScript 类型定义
+
+---
+
+## 技术文档
+
+更多详细信息，请查看项目内的文档：
+
+- WebSocket 使用指南：`src/service/socket/`
+- 地图功能说明：`src/service/map/`
+- FLV 播放器：`src/service/flv/FlvManger.md`
+- WebRTC/WHEP：`src/service/rtc/WHEP.md`
+
+---
+
+## 相关链接
+
+- [VuePlus 脚手架](https://www.npmjs.com/package/create-vueplus)
+- [Vue 3 文档](https://cn.vuejs.org/)
+- [Vite 文档](https://cn.vitejs.dev/)
+- [Element Plus](https://element-plus.org/zh-CN/)
+- [Tailwind CSS](https://tailwindcss.com/)
+
+---
+
+## License
+
+MIT

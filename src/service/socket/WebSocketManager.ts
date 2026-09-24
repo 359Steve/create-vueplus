@@ -5,6 +5,7 @@ import type {
     WebSocketPayload,
     WebSocketStatus,
 } from './types';
+import type { SocketMessageType, TypedWebSocketMessage } from '@/types/socketMessage';
 import { getReconnectDelay } from './reconnect';
 import { DEFAULT_QUEUE_LIMIT } from './types';
 import { WebSocketEventBus } from './WebSocketEventBus';
@@ -26,9 +27,9 @@ export class WebSocketManager {
     private readonly heartbeat: WebSocketHeartbeat;
 
     /** 当前有效的 WebSocket 实例 */
-    private socket: WebSocket | undefined;
+    private socket?: WebSocket;
     /** 下一次重连的定时器 */
-    private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    private reconnectTimer?: ReturnType<typeof setTimeout>;
     /** 确保异步消息按接收顺序完成解析 */
     private messageChain: Promise<void> = Promise.resolve();
     /** 当前连续重连次数 */
@@ -109,8 +110,11 @@ export class WebSocketManager {
     /** 订阅所有已解析的服务端消息 */
     onMessage<T = unknown>(_handler: (_message: T) => void): () => void;
     /** 按消息类型订阅并自动推导消息体类型 */
-    onMessage<T extends MessageId>(_messageId: T, _handler: (_message: TypedWebSocketMessage<T>) => void): () => void;
-    onMessage<T extends MessageId>(
+    onMessage<T extends SocketMessageType>(
+        _messageId: T,
+        _handler: (_message: TypedWebSocketMessage<T>) => void,
+    ): () => void;
+    onMessage<T extends SocketMessageType>(
         messageIdOrHandler: T | ((_message: unknown) => void),
         handler?: (_message: TypedWebSocketMessage<T>) => void,
     ): () => void {
@@ -132,7 +136,10 @@ export class WebSocketManager {
     }
 
     /** 判断消息是否属于指定消息类型 */
-    private isMessageOfType<T extends MessageId>(message: unknown, messageId: T): message is TypedWebSocketMessage<T> {
+    private isMessageOfType<T extends SocketMessageType>(
+        message: unknown,
+        messageId: T,
+    ): message is TypedWebSocketMessage<T> {
         return Boolean(
             message && typeof message === 'object' && (message as TypedWebSocketMessage<T>).MessageId === messageId,
         );
@@ -146,10 +153,10 @@ export class WebSocketManager {
         try {
             const socket = new WebSocket(this.resolveUrl(), this.options.protocols);
             this.socket = socket;
-            socket.onopen = (event) => this.handleOpen(socket, event);
-            socket.onclose = (event) => this.handleClose(socket, event);
-            socket.onerror = (event) => this.events.emit('error', event);
-            socket.onmessage = (event) => this.enqueueMessage(event);
+            socket.onopen = (event): void => this.handleOpen(socket, event);
+            socket.onclose = (event): void => this.handleClose(socket, event);
+            socket.onerror = (event): void => this.events.emit('error', event);
+            socket.onmessage = (event): void => this.enqueueMessage(event);
         } catch (error) {
             this.emitError(error);
             this.scheduleReconnect();

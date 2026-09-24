@@ -1,86 +1,131 @@
 import type L from 'leaflet';
+import type { DrawSession } from './BaseDrawer';
 import type { DrawRequest } from './DrawTypes';
 import { BaseDrawer } from './BaseDrawer';
 
+/** 圆形绘制器：单击确定圆心，再次单击确定半径 */
 export class CircleDrawer extends BaseDrawer {
-    draw(args: DrawRequest<'Circle'>) {
+    /** 当前绘制会话 */
+    private _drawSession: ReturnType<BaseDrawer['createDrawSession']>;
+    /** 当前图层编辑会话 */
+    private _layerSession: ReturnType<BaseDrawer['createLayerSession']>;
+    /** 圆心坐标 */
+    private _center: L.LatLngExpression | null = null;
+    /** 预览圆图层 ID */
+    private readonly _previewCircleId = this.createDrawId('previewCircle');
+
+    /**
+     * 开始绘制圆形
+     * @param args 圆形绘制请求
+     * @returns 绘制会话；地图未就绪时返回 undefined
+     */
+    draw(args: DrawRequest<'Circle'>): DrawSession | undefined {
         const map = this._mapManager.map;
 
         if (!map) return;
 
         const { callback, options } = args;
-        let center: L.LatLngExpression | null = null;
-        let previewCircle = this._mapManager.circle.addCircle({
-            id: 'previewCircle',
-            Lat: 0,
-            Lon: 0,
-            radius: 0,
-            options: this.getPreviewPathOptions(options),
-        });
+        const { tooltip, toolTipOptions, ...arg } = options ?? {};
 
-        if (!previewCircle) return;
+        let previewCircle: L.Circle | null;
 
         /** 地图添加鼠标移动事件 */
-        const handleMouseMove = (e: L.LeafletMouseEvent) => {
-            if (!center) return;
+        const handleMouseMove = (e: L.LeafletMouseEvent): void => {
+            if (!this._center) return;
 
-            const radius = this._mapManager.tool.calculateDistance(center, [e.latlng.lat, e.latlng.lng]);
+            const radius = this._mapManager.tool.calculateDistance(this._center, [e.latlng.lat, e.latlng.lng]);
 
             previewCircle?.setRadius(radius);
         };
 
         const handleCircleClick = this.createEditClickHandler(
-            () => previewCircle,
-            (currentCircle) => {
+            (): L.Circle | null => previewCircle,
+            (currentCircle): void => {
                 const currentCenter = currentCircle.getLatLng();
 
                 callback({
-                    center: [currentCenter.lat, currentCenter.lng],
-                    radius: currentCircle.getRadius(),
+                    id: this._previewCircleId,
+                    data: {
+                        center: [currentCenter.lat, currentCenter.lng],
+                        radius: currentCircle.getRadius(),
+                    },
                 });
             },
         );
 
         // 地图添加点击事件
-        const handleMapClick = (e: L.LeafletMouseEvent) => {
-            const { lat, lng } = e.latlng;
+        const handleMapClick = (e: L.LeafletMouseEvent): void => {
+            const point: L.LatLngExpression = [e.latlng.lat, e.latlng.lng];
 
             // 确定圆心
-            if (!center) {
-                center = [lat, lng];
-
-                previewCircle?.setLatLng(center);
+            if (!previewCircle) {
+                this._center = point;
+                previewCircle = this._mapManager.circle.addCircle(
+                    this._previewCircleId,
+                    point,
+                    0,
+                    this.getPreviewPathOptions(arg),
+                );
 
                 return;
             }
 
             // 确定半径
-            const radius = this._mapManager.tool.calculateDistance(center, [lat, lng]);
+            const radius = this._mapManager.tool.calculateDistance(this._center!, point);
 
             previewCircle?.setRadius(radius);
 
-            // 转换为正式样式
-            previewCircle?.setStyle(this.getFinalPathOptions(options));
+            this._drawSession?.complete();
+
+            previewCircle?.setStyle(this.getFinalPathOptions(arg));
+            previewCircle?.bindTooltip(tooltip || '点击编辑', toolTipOptions);
 
             // 停止绘制阶段
             map.off('click', handleMapClick);
             map.off('mousemove', handleMouseMove);
 
-            previewCircle?.on('click', handleCircleClick);
-            previewCircle?.pm.enable();
+            this._layerSession = this.createLayerSession(
+                [
+                    ['click', handleCircleClick],
+                    [
+                        'remove',
+                        (e: L.LeafletEvent): void => this.layerMarkerRemove(e, this._drawSession?.finish, args.notice),
+                    ],
+                    ['pm:enable', this.layerEdit],
+                    ['pm:disable', this.layerEdit],
+                ],
+                (): L.Circle | null => previewCircle,
+            );
+
+            callback({
+                id: this._previewCircleId,
+                data: {
+                    center: this._center!,
+                    radius,
+                },
+            });
         };
 
-        return this.createDrawSession(
+        this._drawSession = this.createDrawSession(
             [
-                ['click', handleMapClick],
+                ['click', (e: L.LeafletMouseEvent): void => this.createClicks(e, handleMapClick)],
                 ['mousemove', handleMouseMove],
             ],
-            () => {
-                center = null;
-                previewCircle?.off('click', handleCircleClick);
+            (): void => {
+                this._layerSession?.finish();
+
+                if (previewCircle) {
+                    previewCircle?.off('click', handleCircleClick);
+                    this._mapManager.circle.removeCircle(this._previewCircleId);
+                }
+
+                this._center = null;
                 previewCircle = null;
-                this._mapManager.circle.removeCircle('previewCircle');
+                this._drawSession = undefined;
+                this._layerSession = undefined;
             },
         );
+
+        return this._drawSession;
     }
 }

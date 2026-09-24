@@ -17,18 +17,30 @@ import '@geoman-io/leaflet-geoman-free';
  * Leaflet 地图管理器：封装底图、视图控制以及点/线/面/圆/矩形/轨迹等常用覆盖物操作
  */
 class MapManager {
+    /** 绘制工具管理器 */
     readonly draw: MapDraw;
+    /** 标记管理器 */
     readonly marker: MapMarker;
+    /** 圆形管理器 */
     readonly circle: MapCircle;
+    /** 矩形管理器 */
     readonly rectangles: MapRectangles;
+    /** 折线管理器 */
     readonly polylines: MapPolylines;
+    /** 多边形管理器 */
     readonly polygons: MapPolygons;
+    /** 图层组管理器 */
     readonly layergroups: MapLayerGroups;
+    /** 瓦片图层管理器 */
     readonly tilelayers: MapTileLayers;
+    /** 轨迹管理器 */
     readonly trajectories: MapTrajectories;
+    /** 地图工具集 */
     readonly tool: MapTool = new MapTool();
 
+    /** Leaflet 地图实例 */
     private _map: L.Map | null = null;
+    /** 无人机标记共用弹窗 DOM */
     private _defaultMarkerPopup: HTMLElement | null = null;
 
     constructor() {
@@ -53,7 +65,15 @@ class MapManager {
         return this._defaultMarkerPopup;
     }
 
-    /** 注册所有标记点共用的默认弹窗内容 */
+    /** 获取地图容器 HTML 元素 */
+    get mapContainer(): HTMLElement | undefined {
+        return this.map?.getContainer();
+    }
+
+    /**
+     * 注册所有标记点共用的默认弹窗内容
+     * @param popup 弹窗 HTML 元素
+     */
     setDefaultMarkerPopup(popup: HTMLElement | null): void {
         this._defaultMarkerPopup = popup;
     }
@@ -87,12 +107,13 @@ class MapManager {
     /**
      * 销毁地图，并清理全部底图与覆盖物缓存
      */
-    destroyMap() {
+    destroyMap(): void {
         if (!this._map) return;
 
+        this.draw.stopDraw();
         this.clearAllOverlays();
         this.tilelayers.clear();
-        this.layergroups.clear();
+        this._map.off();
         this._map.remove();
         this._map = null;
         this._defaultMarkerPopup = null;
@@ -113,7 +134,7 @@ class MapManager {
         const map = this._map;
         if (!map) return () => {};
 
-        const handlerClick = (e: L.LeafletMouseEvent) => {
+        const handlerClick = (e: L.LeafletMouseEvent): void => {
             const { lat, lng } = e.latlng;
 
             if (showPopup) {
@@ -150,7 +171,7 @@ class MapManager {
     /**
      * 容器尺寸变化后调用，强制地图重新计算尺寸并修正瓦片错位
      */
-    invalidateSize() {
+    invalidateSize(): void {
         this._map?.invalidateSize();
     }
 
@@ -160,7 +181,7 @@ class MapManager {
      * @param lon 经度
      * @param zoom 可选缩放级别；不传则保持当前缩放
      */
-    setView(lat: number, lon: number, zoom?: number) {
+    setView(lat: number, lon: number, zoom?: number): void {
         if (!this._map) return;
         if (zoom !== undefined) {
             this._map.setView([lat, lon], zoom);
@@ -174,15 +195,28 @@ class MapManager {
      * @param lat 纬度
      * @param lon 经度
      */
-    panTo(lat: number, lon: number) {
-        this._map?.panTo([lat, lon]);
+    panTo(lat: number, lon: number): void {
+        if (!this._map) return;
+
+        const current = this.getCenter();
+
+        if (!current) return;
+
+        const target: L.LatLngExpression = [lat, lon];
+        const distance = this.tool.calculateDistance([current.lat, current.lng], target);
+        const duration = Math.min(3, Math.max(0.2, distance / 5000));
+
+        this._map.panTo(target, {
+            animate: true,
+            duration,
+        });
     }
 
     /**
      * 设置地图缩放级别
      * @param zoom 目标缩放级别
      */
-    setZoom(zoom: number) {
+    setZoom(zoom: number): void {
         this._map?.setZoom(zoom);
     }
 
@@ -195,7 +229,9 @@ class MapManager {
     }
 
     /**
-     * 根据高度设置地图缩放级别
+     * 根据飞行高度估算并设置地图缩放级别
+     * @param altitude 当前高度（米）
+     * @param options 高度与缩放映射范围
      */
     setZoomByAltitude(
         altitude: number,
@@ -205,12 +241,14 @@ class MapManager {
             minZoom?: number;
             maxZoom?: number;
         },
-    ) {
+    ): void {
         const { minAltitude = 10, maxAltitude = 1000, minZoom = 10, maxZoom = 18 } = options ?? {};
 
-        const ratio = Math.max(0, Math.min(1, (altitude - minAltitude) / (maxAltitude - minAltitude)));
+        const zoomRange = maxZoom - minZoom;
+        const altitudeRange = maxAltitude - minAltitude;
+        const ratio = altitudeRange === 0 ? 0 : Math.max(0, Math.min(1, (altitude - minAltitude) / altitudeRange));
 
-        const zoom = maxZoom - ratio * (maxZoom - minZoom);
+        const zoom = maxZoom - ratio * zoomRange;
 
         this._map?.setZoom(zoom);
     }
@@ -230,7 +268,7 @@ class MapManager {
      * @param points 坐标点列表
      * @param options Leaflet fitBounds 配置
      */
-    fitPoints(points: L.LatLngExpression[], options?: L.FitBoundsOptions) {
+    fitPoints(points: L.LatLngExpression[], options?: L.FitBoundsOptions): void {
         if (!this._map || points.length === 0) return;
         this._map.fitBounds(
             L.latLngBounds(
@@ -247,50 +285,8 @@ class MapManager {
      * @param bounds 目标范围
      * @param options Leaflet fitBounds 配置
      */
-    fitBounds(bounds: L.LatLngBoundsExpression, options?: L.FitBoundsOptions) {
+    fitBounds(bounds: L.LatLngBoundsExpression, options?: L.FitBoundsOptions): void {
         this._map?.fitBounds(bounds, options);
-    }
-
-    /**
-     * 设置单个图层显隐
-     * @param layer 目标图层
-     * @param visible 是否可见
-     */
-    setLayerVisible(layer: L.Layer | undefined, visible: boolean) {
-        if (!layer || !this._map) return;
-        if (visible) {
-            if (!this._map.hasLayer(layer)) {
-                layer.addTo(this._map);
-            }
-        } else {
-            layer.remove();
-        }
-    }
-
-    // ====== 状态查询 ======
-
-    /**
-     * 判断指定 id 是否存在于管理器缓存中。
-     * 未指定类型时，检查所有覆盖物、底图及图层组。
-     * @param id 元素 id
-     * @param type 可选元素类型
-     */
-    has(id: string, type?: ManagedElementType): boolean {
-        const stores = {
-            marker: this.marker.markers,
-            tileLayer: this.tilelayers.tileLayers,
-            polyline: this.polylines.polylines,
-            polygon: this.polygons.polygons,
-            circle: this.circle.circles,
-            rectangle: this.rectangles.rectangles,
-            trajectory: this.trajectories.trajectories,
-            layerGroup: this.layergroups.layerGroups,
-        } as const;
-
-        if (type) return stores[type].has(id);
-        return Object.values(stores).some((store) => {
-            return store.has(id);
-        });
     }
 
     // ====== 批量清理 ======
@@ -298,28 +294,56 @@ class MapManager {
     /**
      * 清除指定无人机的所有元素
      * @param id 无人机id
+     * @returns 是否成功清除
      */
-    clearCurrent(id: string) {
-        this.marker.removeMarker(id);
-        this.polylines.removePolyline(id);
-        this.polygons.removePolygon(id);
-        this.circle.removeCircle(id);
-        this.rectangles.removeRectangle(id);
-        this.trajectories.removeTrajectory(id);
+    clearCurrent(id: string): boolean {
+        if (!id) return false;
+
+        let cleared = false;
+
+        if (this.marker.removeMarker(id)) cleared = true;
+        if (this.polylines.removePolyline(id)) cleared = true;
+        if (this.polygons.removePolygon(id)) cleared = true;
+        if (this.circle.removeCircle(id)) cleared = true;
+        if (this.rectangles.removeRectangle(id)) cleared = true;
+        if (this.trajectories.removeTrajectory(id)) cleared = true;
+
         this.layergroups.removeLayerGroup(id);
+
+        return cleared;
     }
 
     /**
      * 清除所有覆盖物，不影响底图
      */
-    clearAllOverlays() {
+    clearAllOverlays(): void {
+        if (!this._map) return;
+
+        this.draw.stopDraw();
+
         this.marker.clearMarkers();
         this.polylines.clearPolylines();
         this.polygons.clearPolygons();
         this.circle.clearCircles();
         this.rectangles.clearRectangles();
         this.trajectories.clearTrajectories();
-        this.layergroups.clearLayerGroupAll();
+
+        this.layergroups.clear();
+    }
+
+    /**
+     * 重置地图到初始状态，保留地图实例和底图
+     */
+    resetMap(): void {
+        if (!this._map) return;
+
+        this.clearAllOverlays();
+        this.tilelayers.clear();
+
+        const center = this._map.options.center || [29.75, 120.21];
+        const zoom = this._map.options.zoom || 13;
+
+        this._map.setView(center as L.LatLngExpression, zoom as number);
     }
 }
 

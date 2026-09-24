@@ -1,82 +1,127 @@
 import type L from 'leaflet';
+import type { DrawSession } from './BaseDrawer';
 import type { DrawRequest } from './DrawTypes';
 import { BaseDrawer } from './BaseDrawer';
 
+/** 矩形绘制器：两次单击确定对角点 */
 export class RectangleDrawer extends BaseDrawer {
-    draw(args: DrawRequest<'Rectangle'>) {
+    /** 矩形第一个角点 */
+    private _pinnacle: L.LatLngTuple | null = null;
+    /** 矩形图层 ID */
+    private readonly _rectangleId = this.createDrawId('rectangle');
+    /** 当前绘制会话 */
+    private _drawSession: ReturnType<BaseDrawer['createDrawSession']>;
+    /** 当前图层编辑会话 */
+    private _layerSession: ReturnType<BaseDrawer['createLayerSession']>;
+
+    /**
+     * 开始绘制矩形
+     * @param args 矩形绘制请求
+     * @returns 绘制会话；地图未就绪时返回 undefined
+     */
+    draw(args: DrawRequest<'Rectangle'>): DrawSession | undefined {
         const map = this._mapManager.map;
 
         if (!map) return;
 
         const { callback, options } = args;
-        // 第一个角
-        let pinnacle: L.LatLngTuple | null = null;
-        // 预览矩形
-        let previewRectangle = this._mapManager.rectangles.addRectangle(
-            [
-                [0, 0],
-                [0, 0],
-            ],
-            this.getPreviewPathOptions(options),
-            'previewRectangle',
-        );
+        const { tooltip, toolTipOptions, ...arg } = options ?? {};
 
-        if (!previewRectangle) return;
+        let previewRectangle: L.Rectangle | null;
 
         /** 鼠标移动 */
-        const handleMouseMove = (e: L.LeafletMouseEvent) => {
-            if (!pinnacle) return;
+        const handleMouseMove = (e: L.LeafletMouseEvent): void => {
+            if (!this._pinnacle) return;
 
-            previewRectangle?.setBounds([pinnacle, [e.latlng.lat, e.latlng.lng]]);
+            previewRectangle?.setBounds([this._pinnacle, [e.latlng.lat, e.latlng.lng]]);
         };
 
         const handleRectangleClick = this.createEditClickHandler(
-            () => previewRectangle,
-            (currentRectangle) => {
-                const points = currentRectangle.getLatLngs() as L.LatLng[];
+            (): L.Rectangle | null => previewRectangle,
+            (currentRectangle): void => {
+                const bounds = currentRectangle.getBounds();
+                const northEast = bounds.getNorthEast();
+                const southWest = bounds.getSouthWest();
 
-                callback(points.map((item) => [item.lat, item.lng]));
+                callback({
+                    id: this._rectangleId,
+                    data: [
+                        [southWest.lat, southWest.lng],
+                        [northEast.lat, northEast.lng],
+                    ],
+                });
             },
         );
 
         /**
          * 鼠标点击
          */
-        const handleClick = (e: L.LeafletMouseEvent) => {
+        const handleClick = (e: L.LeafletMouseEvent): void => {
             const point: L.LatLngTuple = [e.latlng.lat, e.latlng.lng];
 
             // 第一次点击：确定第一个角
-            if (!pinnacle) {
-                pinnacle = point;
-                previewRectangle?.setBounds([pinnacle, pinnacle]);
+            if (!this._pinnacle && !previewRectangle) {
+                this._pinnacle = point;
+
+                previewRectangle = this._mapManager.rectangles.addRectangle(
+                    this._rectangleId,
+                    [point],
+                    this.getPreviewPathOptions(arg),
+                );
 
                 return;
             }
 
-            previewRectangle?.setBounds([pinnacle, point]);
+            previewRectangle?.setBounds([this._pinnacle!, point]);
 
-            // 正式样式
-            previewRectangle?.setStyle(this.getFinalPathOptions(options));
+            this._drawSession?.complete();
+
+            previewRectangle?.setStyle(this.getFinalPathOptions(arg));
+            previewRectangle?.bindTooltip(tooltip || '点击编辑', toolTipOptions);
 
             // 停止绘制
             map.off('click', handleClick);
             map.off('mousemove', handleMouseMove);
 
-            previewRectangle?.on('click', handleRectangleClick);
-            previewRectangle?.pm.enable();
+            this._layerSession = this.createLayerSession(
+                [
+                    ['click', handleRectangleClick],
+                    [
+                        'remove',
+                        (e: L.LeafletEvent): void => this.layerMarkerRemove(e, this._drawSession?.finish, args.notice),
+                    ],
+                    ['pm:enable', this.layerEdit],
+                    ['pm:disable', this.layerEdit],
+                ],
+                (): L.Rectangle | null => previewRectangle,
+            );
+
+            callback({
+                id: this._rectangleId,
+                data: [this._pinnacle!, point],
+            });
         };
 
-        return this.createDrawSession(
+        this._drawSession = this.createDrawSession(
             [
-                ['click', handleClick],
+                ['click', (e: L.LeafletMouseEvent): void => this.createClicks(e, handleClick)],
                 ['mousemove', handleMouseMove],
             ],
-            () => {
-                previewRectangle?.off('click', handleRectangleClick);
-                pinnacle = null;
+            (): void => {
+                this._layerSession?.finish();
+
+                if (previewRectangle) {
+                    previewRectangle.off('click', handleRectangleClick);
+                    this._mapManager.rectangles.removeRectangle(this._rectangleId);
+                }
+
                 previewRectangle = null;
-                this._mapManager.rectangles.removeRectangle('previewRectangle');
+                this._pinnacle = null;
+                this._drawSession = undefined;
+                this._layerSession = undefined;
             },
         );
+
+        return this._drawSession;
     }
 }

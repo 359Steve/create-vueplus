@@ -1,12 +1,10 @@
 {
 	"compilerOptions": {
-		"baseUrl": ".",
 		"paths": {
 			"@/*": [
 				"./src/*"
 			]
 		},
-		"ignoreDeprecations": "6.0"
 	},
 	"references": [
 		{
@@ -17,10 +15,5 @@
 		}
 	],
 	"files": [],
-	"include": [
-		"src/**/*.ts",
-		"src/**/*.d.ts",
-		"src/**/*.tsx",
-		"src/**/*.vue"
-	]
+	"include": []
 }
